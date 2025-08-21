@@ -1,0 +1,352 @@
+--// Loader GUI (minimal, no cosmetics)
+local player = game.Players.LocalPlayer
+local StarterGui = Instance.new("ScreenGui")
+StarterGui.Name = "ChoiceGui"
+StarterGui.ResetOnSpawn = false
+StarterGui.Parent = player:WaitForChild("PlayerGui")
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 200, 0, 120)
+Frame.Position = UDim2.new(0.5, -100, 0.5, -60)
+Frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+Frame.Parent = StarterGui
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 30)
+Title.BackgroundTransparency = 1
+Title.Text = "Choose GUI Type"
+Title.Font = Enum.Font.SourceSansBold
+Title.TextSize = 18
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Parent = Frame
+
+local RayfieldBtn = Instance.new("TextButton")
+RayfieldBtn.Size = UDim2.new(0.9, 0, 0, 30)
+RayfieldBtn.Position = UDim2.new(0.05, 0, 0.35, 0)
+RayfieldBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+RayfieldBtn.Text = "Rayfield GUI"
+RayfieldBtn.Font = Enum.Font.SourceSansBold
+RayfieldBtn.TextSize = 16
+RayfieldBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+RayfieldBtn.Parent = Frame
+
+local PlainBtn = RayfieldBtn:Clone()
+PlainBtn.Text = "Plain GUI"
+PlainBtn.Position = UDim2.new(0.05, 0, 0.65, 0)
+PlainBtn.Parent = Frame
+
+
+--// Shared Core
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+
+local antiStealMode = "Kick"
+local antiStealEnabled = false
+local baseConnection = nil
+
+local treatFriendsAsSafe = true
+local blacklist = {} -- {["username"] = true}
+
+local function TeleportForward()
+    local char = player.Character or player.CharacterAdded:Wait()
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        hrp.CFrame = hrp.CFrame + hrp.CFrame.LookVector * 6
+    end
+end
+
+local function FindMyBase()
+    for i = 1, 8 do
+        local base = workspace:FindFirstChild("tycoonBaseplate"..i)
+        if base and base:FindFirstChild("Owner") then
+            if base.Owner:IsA("StringValue") and base.Owner.Value == player.Name then
+                return base
+            end
+        end
+    end
+    return nil
+end
+
+local function TeleportBase()
+    local char = player.Character or player.CharacterAdded:Wait()
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local myBase = FindMyBase()
+    if myBase then
+        hrp.CFrame = myBase.CFrame + Vector3.new(0, 5, 0)
+    else
+        warn("No owned base found!")
+    end
+end
+
+
+--// Anti-Steal
+local function PerformAntiSteal()
+    if antiStealMode == "Kick" then
+        player:Kick("Anti-Steal: Someone entered your base.")
+    elseif antiStealMode == "Server Hop" then
+        local success, servers = pcall(function()
+            return HttpService:JSONDecode(
+                game:HttpGet("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100")
+            )
+        end)
+        if success and servers and servers.data then
+            for _, srv in ipairs(servers.data) do
+                if srv.playing < srv.maxPlayers then
+                    TeleportService:TeleportToPlaceInstance(game.PlaceId, srv.id, player)
+                    break
+                end
+            end
+        end
+    end
+end
+
+local function IsEnemy(plr)
+    if blacklist[plr.Name] then return true end
+    local isFriend = pcall(function() return player:IsFriendsWith(plr.UserId) end) and player:IsFriendsWith(plr.UserId)
+    return treatFriendsAsSafe and not isFriend
+        or (not treatFriendsAsSafe and true) -- treat everyone as enemy if "enemy mode"
+end
+
+local function EnableAntiSteal(state)
+    antiStealEnabled = state
+
+    if baseConnection then
+        baseConnection:Disconnect()
+        baseConnection = nil
+    end
+
+    if not state then return end
+
+    local myBase = FindMyBase()
+    if not myBase then
+        warn("Anti-Steal enabled but no base found!")
+        return
+    end
+
+    baseConnection = myBase.Touched:Connect(function(hit)
+        local char = hit:FindFirstAncestorWhichIsA("Model")
+        local plr = char and game.Players:GetPlayerFromCharacter(char)
+        if plr and plr ~= player and IsEnemy(plr) then
+            PerformAntiSteal()
+        end
+    end)
+end
+
+
+--// Highlights
+local highlights = {}
+local function ApplyHighlight(plr)
+    if plr ~= player and plr.Character and not highlights[plr] then
+        local h = Instance.new("Highlight")
+        h.Adornee = plr.Character
+        h.FillColor = Color3.fromRGB(255, 0, 0)
+        h.OutlineColor = Color3.fromRGB(255, 255, 255)
+        h.Parent = plr.Character
+        highlights[plr] = h
+    end
+end
+
+local function ToggleHighlights(state)
+    if state then
+        for _, plr in pairs(game.Players:GetPlayers()) do ApplyHighlight(plr) end
+        game.Players.PlayerAdded:Connect(function(plr)
+            plr.CharacterAdded:Connect(function()
+                task.wait(1) ApplyHighlight(plr)
+            end)
+        end)
+    else
+        for _, h in pairs(highlights) do if h then h:Destroy() end end
+        highlights = {}
+    end
+end
+
+
+--// Rayfield Version
+local function LoadRayfield()
+    StarterGui:Destroy()
+    local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+    local Window = Rayfield:CreateWindow({
+        Name = "Egor Hub",
+        LoadingTitle = "Egor Hub - Steal a tycoon",
+        LoadingSubtitle = "Keyless",
+        ConfigurationSaving = { Enabled = false },
+        KeySystem = false
+    })
+
+    local TeleportTab = Window:CreateTab("Teleport", 4483362458)
+    TeleportTab:CreateButton({Name = "Teleport Forward", Callback = TeleportForward})
+    TeleportTab:CreateButton({Name = "Teleport To My Base", Callback = TeleportBase})
+
+    local PlayersTab = Window:CreateTab("Players", 4483362458)
+    PlayersTab:CreateToggle({Name = "Toggle Player ESP", CurrentValue = false, Callback = ToggleHighlights})
+    PlayersTab:CreateToggle({
+        Name = "Treat Friends as Safe",
+        CurrentValue = true,
+        Callback = function(val) treatFriendsAsSafe = val end
+    })
+    PlayersTab:CreateInput({
+        Name = "Add to Blacklist",
+        PlaceholderText = "Enter username",
+        RemoveTextAfterFocusLost = true,
+        Callback = function(text) blacklist[text] = true end
+    })
+    PlayersTab:CreateInput({
+        Name = "Remove from Blacklist",
+        PlaceholderText = "Enter username",
+        RemoveTextAfterFocusLost = true,
+        Callback = function(text) blacklist[text] = nil end
+    })
+
+    local SecurityTab = Window:CreateTab("Security", 4483362458)
+    SecurityTab:CreateDropdown({
+        Name = "Anti-Steal Mode",
+        Options = {"Kick", "Server Hop (NOT WORKING RN)"},
+        CurrentOption = "Kick",
+        Callback = function(opt) antiStealMode = opt end
+    })
+    SecurityTab:CreateToggle({
+        Name = "Enable Anti-Steal",
+        CurrentValue = false,
+        Callback = EnableAntiSteal
+    })
+end
+
+
+--// Plain Version
+local function LoadPlain()
+    StarterGui:Destroy()
+    local Gui = Instance.new("ScreenGui", player.PlayerGui)
+    Gui.Name = "PlainMenu"
+    Gui.ResetOnSpawn = false
+
+    local Frame = Instance.new("Frame", Gui)
+    Frame.Size = UDim2.new(0, 300, 0, 300)
+    Frame.Position = UDim2.new(0.1, 0, 0.2, 0)
+    Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    Frame.Active = true
+    Frame.Draggable = true
+    Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 12)
+    Instance.new("UIStroke", Frame).Color = Color3.fromRGB(200, 200, 200)
+
+    -- header
+    local Header = Instance.new("Frame", Frame)
+    Header.Size = UDim2.new(1, 0, 0, 30)
+    Header.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    Instance.new("UICorner", Header).CornerRadius = UDim.new(0, 12)
+
+    local Close = Instance.new("TextButton", Header)
+    Close.Size = UDim2.new(0, 30, 1, 0)
+    Close.Position = UDim2.new(1, -30, 0, 0)
+    Close.Text = "X"
+    Close.TextColor3 = Color3.fromRGB(255, 0, 0)
+    Close.MouseButton1Click:Connect(function() Gui:Destroy() end)
+
+    local Min = Instance.new("TextButton", Header)
+    Min.Size = UDim2.new(0, 30, 1, 0)
+    Min.Position = UDim2.new(1, -60, 0, 0)
+    Min.Text = "-"
+    Min.TextColor3 = Color3.fromRGB(255, 255, 0)
+    local minimized = false
+    Min.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        for _, child in ipairs(Frame:GetChildren()) do
+            if child ~= Header then child.Visible = not minimized end
+        end
+    end)
+
+    -- tabs
+    local Tabs = Instance.new("Folder", Frame)
+    local function CreateTab(name)
+        local Tab = Instance.new("Frame", Frame)
+        Tab.Name = name
+        Tab.Size = UDim2.new(1, -20, 1, -50)
+        Tab.Position = UDim2.new(0, 10, 0, 40)
+        Tab.BackgroundTransparency = 1
+        Tab.Visible = false
+        Instance.new("UIListLayout", Tab).Padding = UDim.new(0, 6)
+        Tab.Parent = Tabs
+        return Tab
+    end
+
+    local TeleportTab = CreateTab("Teleport")
+    local PlayersTab = CreateTab("Players")
+    local SecurityTab = CreateTab("Security")
+
+    -- nav buttons
+    local Nav = Instance.new("Frame", Frame)
+    Nav.Size = UDim2.new(1, -20, 0, 30)
+    Nav.Position = UDim2.new(0, 10, 0, 35)
+    Nav.BackgroundTransparency = 1
+    Instance.new("UIListLayout", Nav).FillDirection = Enum.FillDirection.Horizontal
+
+    local function CreateNavBtn(text, tab)
+        local Btn = Instance.new("TextButton", Nav)
+        Btn.Size = UDim2.new(0, 80, 1, 0)
+        Btn.Text = text
+        Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        Btn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        Btn.MouseButton1Click:Connect(function()
+            for _, t in ipairs(Tabs:GetChildren()) do t.Visible = false end
+            tab.Visible = true
+        end)
+        return Btn
+    end
+
+    CreateNavBtn("Teleport", TeleportTab).BackgroundColor3 = Color3.fromRGB(80,80,80)
+    CreateNavBtn("Players", PlayersTab)
+    CreateNavBtn("Security", SecurityTab)
+
+    -- Teleport tab buttons
+    local function CreateBtn(parent, text, cb)
+        local Btn = Instance.new("TextButton", parent)
+        Btn.Size = UDim2.new(1, 0, 0, 35)
+        Btn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        Btn.Text = text
+        Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        Btn.Font = Enum.Font.SourceSansBold
+        Btn.TextSize = 16
+        Instance.new("UICorner", Btn).CornerRadius = UDim.new(0, 8)
+        Btn.MouseButton1Click:Connect(cb)
+    end
+
+    CreateBtn(TeleportTab, "Teleport Forward", TeleportForward)
+    CreateBtn(TeleportTab, "Teleport To Base", TeleportBase)
+
+    -- Players tab
+    local highlightToggle = false
+    CreateBtn(PlayersTab, "Toggle Player ESP", function()
+        highlightToggle = not highlightToggle
+        ToggleHighlights(highlightToggle)
+    end)
+
+    CreateBtn(PlayersTab, "Toggle Friend Mode", function()
+        treatFriendsAsSafe = not treatFriendsAsSafe
+    end)
+
+    CreateBtn(PlayersTab, "Add Blacklist (input in chat)", function()
+        player.Chatted:Once(function(msg) blacklist[msg] = true end)
+    end)
+    CreateBtn(PlayersTab, "Remove Blacklist (input in chat)", function()
+        player.Chatted:Once(function(msg) blacklist[msg] = nil end)
+    end)
+
+    -- Security tab
+    CreateBtn(SecurityTab, "Toggle Anti-Steal", function()
+        antiStealEnabled = not antiStealEnabled
+        EnableAntiSteal(antiStealEnabled)
+    end)
+
+    CreateBtn(SecurityTab, "Switch Anti-Steal Mode", function()
+        antiStealMode = (antiStealMode == "Kick" and "Server Hop" or "Kick")
+    end)
+
+    -- show default tab
+    TeleportTab.Visible = true
+end
+
+
+--// Bind loader
+RayfieldBtn.MouseButton1Click:Connect(LoadRayfield)
+PlainBtn.MouseButton1Click:Connect(LoadPlain)
